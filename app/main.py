@@ -1,19 +1,39 @@
-import socket  # noqa: F401
+import socket, selectors
+
+
+HOST = "localhost"
+PORT = 6379
+PONG = b"+PONG\r\n"
+
+
+sel = selectors.DefaultSelector()
+
+
+def on_new_client(server):
+    conn, _ = server.accept()
+    conn.setblocking(False)
+    sel.register(conn, selectors.EVENT_READ, on_client_data)
+
+
+def on_client_data(conn):
+    data = conn.recv(1024)
+    if data:
+        conn.sendall(PONG)
+    else:
+        sel.unregister(conn)
+        conn.close()
 
 
 def main():
+    server = socket.create_server((HOST, PORT))
+    server.setblocking(False)
+    sel.register(server, selectors.EVENT_READ, on_new_client)
 
 
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    connection, _ = server_socket.accept()
     while True:
-        data = connection.recv(1024)
-        if not data:
-            break
-        connection.sendall(b"+PONG\r\n")
-
-
-
+        for key, _ in sel.select():
+            callback = key.data
+            callback(key.fileobj)
 
 
 if __name__ == "__main__":
