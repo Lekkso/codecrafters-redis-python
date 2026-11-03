@@ -1,4 +1,5 @@
-import socket, selectors
+import selectors
+import socket
 
 
 HOST = "localhost"
@@ -16,7 +17,10 @@ def on_new_client(server):
 
 
 def on_client_data(conn):
-    data = conn.recv(1024)
+    try:
+        data = conn.recv(1024)
+    except ConnectionResetError:
+        data = b""
     if data:
         conn.sendall(PONG)
     else:
@@ -28,8 +32,6 @@ def main():
     server = socket.create_server((HOST, PORT))
     server.setblocking(False)
     sel.register(server, selectors.EVENT_READ, on_new_client)
-
-
     while True:
         for key, _ in sel.select():
             callback = key.data
