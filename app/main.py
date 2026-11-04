@@ -22,7 +22,14 @@ def on_client_data(conn):
     except ConnectionResetError:
         data = b""
     if data:
-        conn.sendall(PONG)
+        parts = data.split(b"\r\n")
+        command = parts[2].upper()
+
+        if command == b"PING":
+            conn.sendall(PONG)
+        elif command == b"ECHO":
+            msg = parts[4]
+            conn.sendall(b"$" + str(len(msg)).encode() + b"\r\n" + msg + b"\r\n")
     else:
         sel.unregister(conn)
         conn.close()
