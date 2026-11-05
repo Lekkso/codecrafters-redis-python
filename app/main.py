@@ -95,7 +95,7 @@ def on_client_data(conn):
                 elif deadline is not None and time.time() > deadline:
                     conn.sendall(NULL)
                 else:
-                    value, None = res
+                    value, deadline = res
                     conn.sendall(bulk_str(value))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
