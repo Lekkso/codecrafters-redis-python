@@ -1,60 +1,100 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/2b9256f9-e020-4182-b95d-35efa299e3bb)](https://app.codecrafters.io/users/Lekkso?r=2qF)
+# Redis — Built From Scratch in Python
 
-This is a starting point for Python solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+A Redis-inspired in-memory key-value database implemented from scratch using Python.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+Built as part of the [CodeCrafters Build Your Own Redis challenge](https://codecrafters.io/challenges/redis), this project explores the internals of Redis, including TCP networking, event-driven architecture, the RESP protocol, and in-memory data storage.
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## Features
 
-# Passing the first stage
+- **TCP Server** — Handles multiple client connections using non-blocking sockets and Python's `selectors` module.
+- **RESP Protocol** — Parses incoming Redis commands and serializes server responses.
+- **Command Support**
+  - `PING`
+  - `ECHO`
+  - `SET`
+  - `GET`
+- **In-Memory Storage** — Stores and retrieves key-value pairs.
+- **Key Expiration** — Supports expiration through `EX` and `PX` options.
 
-The entry point for your Redis implementation is in `app/main.py`. Study and
-uncomment the relevant code, then run the command below to execute the tests on
-our servers:
+## Architecture
 
-```sh
+The server uses an event-driven architecture built around Python's `selectors` module.
+
+Rather than creating a separate thread for every client, the event loop monitors multiple socket connections and dispatches incoming data to the appropriate handlers.
+
+The implementation consists of three main components:
+
+- **Networking:** TCP server, client connections, and event loop.
+- **Protocol:** RESP command parsing and response serialization.
+- **Storage:** In-memory key-value store with expiration support.
+
+## Tech Stack
+
+- Python
+- TCP Sockets
+- RESP (Redis Serialization Protocol)
+- `selectors`
+- `time`
+
+## Running Locally
+
+Clone the repository:
+
+```bash
+git clone https://github.com/Lekkso/codecrafters-redis-python.git
+cd codecrafters-redis-python
+```
+
+Start the server:
+
+```bash
+./your_program.sh
+```
+
+The server listens on `localhost:6379`.
+
+Connect using the Redis CLI:
+
+```bash
+redis-cli
+```
+
+## Testing
+
+Run the CodeCrafters test suite:
+
+```bash
 codecrafters submit
 ```
 
-That's all!
+## What I'm Learning
 
-# Stage 2 & beyond
+- TCP networking and socket programming
+- Event loops and non-blocking I/O
+- Client-server communication
+- Binary data handling and protocol parsing
+- In-memory data structures
+- Time-based operations and key expiration
 
-Note: This section is for stages 2 and beyond.
+## Roadmap
 
-1. Ensure you have `uv` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `app/main.py`.
-1. Run `codecrafters submit` to submit your solution to CodeCrafters. Test
-   output will be streamed to your terminal.
+Planned extensions:
 
-# Troubleshooting
+- [ ] Lists
+- [ ] Sorted Sets
+- [ ] Streams
+- [ ] Transactions
+- [ ] Optimistic Locking
+- [ ] Replication
+- [ ] RDB Persistence
+- [ ] AOF Persistence
+- [ ] Pub/Sub
+- [ ] Authentication
+- [ ] Bitmaps
+- [ ] Geospatial Commands
 
-## module `socket` has no attribute `create_server`
+---
 
-When running your server locally, you might see an error like this:
+**Status:** Base challenge completed. Extensions in progress.
 
-```
-Traceback (most recent call last):
-  File "/.../python3.7/runpy.py", line 193, in _run_module_as_main
-    "__main__", mod_spec)
-  File "/.../python3.7/runpy.py", line 85, in _run_code
-    exec(code, run_globals)
-  File "/app/app/main.py", line 11, in <module>
-    main()
-  File "/app/app/main.py", line 6, in main
-    s = socket.create_server(("localhost", 6379), reuse_port=True)
-AttributeError: module 'socket' has no attribute 'create_server'
-```
-
-This is because `socket.create_server` was introduced in Python 3.8, and you
-might be running an older version.
-
-You can fix this by installing Python 3.8 locally and using that.
-
-If you'd like to use a different version of Python, change the `buildpack` value
-in `codecrafters.yml`.
+[CodeCrafters Challenge](https://codecrafters.io/challenges/redis) · [GitHub Repository](https://github.com/Lekkso/codecrafters-redis-python)
