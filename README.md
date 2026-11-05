@@ -59,14 +59,6 @@ Connect using the Redis CLI:
 redis-cli
 ```
 
-## Testing
-
-Run the CodeCrafters test suite:
-
-```bash
-codecrafters submit
-```
-
 ## What I'm Learning
 
 - TCP networking and socket programming
