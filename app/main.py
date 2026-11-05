@@ -56,7 +56,7 @@ def on_client_data(conn):
             return
 
         command = args[0].upper()
-        value = args[2]
+
         if command == b"PING":
             conn.sendall(PONG)
         elif command == b"ECHO":
@@ -66,7 +66,8 @@ def on_client_data(conn):
                 msg = args[1]
                 conn.sendall(bulk_str(msg))
         elif command == b"SET":
-            if len(args) != 3 or len(args) != 5:
+            value = args[2]
+            if len(args) != 3 and len(args) != 5:
                 conn.sendall(b"-ERR wrong number of arguments for 'set' command\r\n")
             elif len(args) == 3:
                 key = args[1]
@@ -74,14 +75,14 @@ def on_client_data(conn):
                 notebook[key] = (value, deadline)
                 conn.sendall(OK)
             elif len(args) == 5:
-                if args[3].upper == b"PX":
-                    ms = int(str(args[4]))
+                if args[3].upper() == b"PX":
+                    ms = int(args[4])
                     secs = ms / 1000
-                    deadline = time.time() + ms
+                    deadline = time.time() + secs
                     notebook[key] = (value, deadline)
                     conn.sendall(OK)
-                elif args[3].upper == b"EX":
-                    deadline = time.time() + int(str(args[4]))
+                elif args[3].upper() == b"EX":
+                    deadline = time.time() + int(args[4])
                     notebook[key] = (value, deadline)
                     
         elif command == b"GET":
@@ -90,12 +91,12 @@ def on_client_data(conn):
             else:
                 key = args[1]
                 res = notebook.get(key)
+                value, deadline = res
                 if res is None:
                     conn.sendall(NULL)
                 elif deadline is not None and time.time() > deadline:
                     conn.sendall(NULL)
                 else:
-                    value, deadline = res
                     conn.sendall(bulk_str(value))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
