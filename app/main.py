@@ -76,12 +76,14 @@ def on_client_data(conn):
                 conn.sendall(OK)
             elif len(args) == 5:
                 if args[3].upper() == b"PX":
+                    key = args[1]
                     ms = int(args[4])
                     secs = ms / 1000
                     deadline = time.time() + secs
                     notebook[key] = (value, deadline)
                     conn.sendall(OK)
                 elif args[3].upper() == b"EX":
+                    key = args[1]
                     deadline = time.time() + int(args[4])
                     notebook[key] = (value, deadline)
                     
