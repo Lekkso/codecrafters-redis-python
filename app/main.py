@@ -5,9 +5,12 @@ import socket
 HOST = "localhost"
 PORT = 6379
 PONG = b"+PONG\r\n"
+OK = b"+OK\r\n"
+NULL = b"$-1\r\n"
 
 
 sel = selectors.DefaultSelector()
+notebook = {}
 
 
 def parse_command(data):
@@ -30,6 +33,11 @@ def on_new_client(server):
     conn, _ = server.accept()
     conn.setblocking(False)
     sel.register(conn, selectors.EVENT_READ, on_client_data)
+
+
+def bulk_str(value):
+    bulk_string = (b"$" + str(len(value)).encode() + b"\r\n" + value + b"\r\n")
+    return bulk_string
 
 
 def on_client_data(conn):
@@ -55,7 +63,25 @@ def on_client_data(conn):
                 conn.sendall(b"-ERR wrong number of arguments for 'echo' command\r\n")
             else:
                 msg = args[1]
-                conn.sendall(b"$" + str(len(msg)).encode() + b"\r\n" + msg + b"\r\n")
+                conn.sendall(bulk_str(msg))
+        elif command == b"SET":
+            if len(args) != 3:
+                conn.sendall(b"-ERR wrong number of arguments for 'set' command\r\n")
+            else:
+                key = args[1]
+                value = args[2]
+                notebook[key] = value
+                conn.sendall(OK)
+        elif command == b"GET":
+            if len(args) != 2:
+                conn.sendall(b"-ERR wrong number of arguments for 'get' command\r\n")
+            else:
+                key = args[1]
+                res = notebook.get(key)
+                if res is None:
+                    conn.sendall(NULL)
+                else:
+                    conn.sendall(bulk_str(res))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
     else:
