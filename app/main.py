@@ -81,7 +81,7 @@ def handle_set(args):
     elif option == b"EX":
         deadline = time.time() + int(args[4])
     else:
-        return None  # unknown option: no reply, same as before
+        return None
 
     notebook[key] = (value, deadline)
     return OK
@@ -116,9 +116,19 @@ def handle_lrange(args):
         return b"-ERR wrong number of arguments for 'lrange' command\r\n"
 
     key = args[1]
-    start = int(args[2])
-    end = int(args[3]) + 1
     items = lists.get(key, [])
+    length = len(items)
+    start = int(args[2])
+    end = int(args[3])
+    if start < 0:
+        start += length
+        if start < 0:
+            start = 0
+    if end < 0:
+        end += length
+        if end < 0:
+            return array([])
+    end += 1
     return array(items[start:end])
 
 
