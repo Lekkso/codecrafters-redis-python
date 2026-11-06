@@ -153,16 +153,22 @@ def handle_llen(args):
 
 
 def handle_lpop(args):
-    if len(args) != 2:
+    if len(args) not in (2, 3):
         return b"-ERR wrong number of arguments for 'lpop' command\r\n"
 
     lst = lists.get(args[1], [])
-    if not lst:
-        return NULL
-    first = lst.pop(0)
-    return bulk_str(first)
-    
+    if len(args) == 2:
+        if not lst:
+            return NULL
+        first = lst.pop(0)
+        return bulk_str(first)
+    if len(args) == 3:
+        count = int(args[2])
+        removed = lst[:count]
+        del lst[:count]
+        return array(removed)
 
+    
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -195,7 +201,10 @@ def on_client_data(conn):
         if handler is None:
             reply = b"-ERR unknown command\r\n"
         else:
-            reply = handler(args)
+            try:
+                reply = handler(args)
+            except ValueError:
+                reply = b"-ERR value is not an integer or out of range\r\n"
 
         if reply is not None:
             conn.sendall(reply)
