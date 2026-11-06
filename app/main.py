@@ -8,6 +8,7 @@ PORT = 6379
 PONG = b"+PONG\r\n"
 OK = b"+OK\r\n"
 NULL = b"$-1\r\n"
+NULL_ARRAY = b"*-1\r\n"
 
 
 sel = selectors.DefaultSelector()
@@ -106,9 +107,26 @@ def serve_waiters(key):
     lst = lists.get(key, [])
     queue = waiters.get(key, [])
     while lst and queue:
-        waiter_conn = queue.pop(0)
+        waiter_conn, _ = queue.pop(0)
         element = lst.pop(0)
         waiter_conn.sendall(array([key, element]))
+
+
+def next_timeout():
+    deadlines = [d for queue in waiters.values() for _, d in queue if d is not None]
+    if not deadlines:
+        return None
+    return max(0, min(deadlines) - time.time())
+
+
+def expire_waiters():
+    now = time.time()
+    for key, queue in waiters.items():
+        for entry in queue[:]:
+            waiter_conn, deadline = entry
+            if deadline is not None and now > deadline:
+                queue.remove(entry)
+                waiter_conn.sendall(NULL_ARRAY)
 
 
 def handle_rpush(args):
@@ -185,13 +203,18 @@ def handle_lpop(args):
 def handle_blpop(conn, args):
     if len(args) != 3:
         return b"-ERR wrong number of arguments for 'blpop' command\r\n"
+    timeout = float(args[2])
+    if timeout == 0:
+        deadline = None
+    else:
+        deadline = time.time() + timeout
     key = args[1]
     lst = lists.get(key, [])
     if lst:
         element = lst.pop(0)
         return array([key, element])
 
-    waiters.setdefault(key, []).append(conn)
+    waiters.setdefault(key, deadline, []).append(conn)
     return None
 
     
@@ -247,9 +270,10 @@ def main():
     server.setblocking(False)
     sel.register(server, selectors.EVENT_READ, on_new_client)
     while True:
-        for key, _ in sel.select():
+        for key, _ in sel.select(timeout=next_timeout()):
             callback = key.data
             callback(key.fileobj)
+        expire_waiters()
 
 
 if __name__ == "__main__":
