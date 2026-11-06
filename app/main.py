@@ -152,6 +152,17 @@ def handle_llen(args):
     return integer(len(lst))
 
 
+def handle_lpop(args):
+    if len(args) != 2:
+        return b"-ERR wrong number of arguments for 'lpop' command\r\n"
+
+    lst = lists.get(args[1], [])
+    if not lst:
+        return NULL
+    first = lst.pop(0)
+    return bulk_str(first)
+    
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -160,7 +171,8 @@ HANDLERS = {
     b"RPUSH": handle_rpush,
     b"LRANGE": handle_lrange,
     b"LPUSH": handle_lpush,
-    b"LLEN": handle_llen
+    b"LLEN": handle_llen,
+    b"LPOP": handle_lpop
 }
 
 
