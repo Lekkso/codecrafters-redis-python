@@ -143,6 +143,15 @@ def handle_lpush(args):
         items.insert(0, item)
     return integer(len(items))
 
+
+def handle_llen(args):
+    if len(args) != 2:
+        return b"-ERR wrong number of arguments for 'llen' command\r\n"
+
+    lst = lists.get(args[1], [])
+    return integer(len(lst))
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -150,7 +159,8 @@ HANDLERS = {
     b"GET": handle_get,
     b"RPUSH": handle_rpush,
     b"LRANGE": handle_lrange,
-    b"LPUSH": handle_lpush
+    b"LPUSH": handle_lpush,
+    b"LLEN": handle_llen
 }
 
 
