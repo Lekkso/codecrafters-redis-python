@@ -18,16 +18,16 @@ lists = {}
 def parse_command(data):
     pos = data.find(b"\r\n")
     count = int(data[1:pos])
-    pos += 2  
+    pos += 2
 
     args = []
     for _ in range(count):
         end = data.find(b"\r\n", pos)
         length = int(data[pos + 1:end])
-        pos = end + 2  
+        pos = end + 2
 
         args.append(data[pos:pos + length])
-        pos += length + 2  
+        pos += length + 2
     return args
 
 
@@ -54,6 +54,84 @@ def array(items):
     return result
 
 
+def handle_ping(args):
+    return PONG
+
+
+def handle_echo(args):
+    if len(args) != 2:
+        return b"-ERR wrong number of arguments for 'echo' command\r\n"
+    return bulk_str(args[1])
+
+
+def handle_set(args):
+    if len(args) != 3 and len(args) != 5:
+        return b"-ERR wrong number of arguments for 'set' command\r\n"
+
+    key = args[1]
+    value = args[2]
+
+    if len(args) == 3:
+        notebook[key] = (value, None)
+        return OK
+
+    option = args[3].upper()
+    if option == b"PX":
+        deadline = time.time() + int(args[4]) / 1000
+    elif option == b"EX":
+        deadline = time.time() + int(args[4])
+    else:
+        return None  # unknown option: no reply, same as before
+
+    notebook[key] = (value, deadline)
+    return OK
+
+
+def handle_get(args):
+    if len(args) != 2:
+        return b"-ERR wrong number of arguments for 'get' command\r\n"
+
+    res = notebook.get(args[1])
+    if res is None:
+        return NULL
+
+    value, deadline = res
+    if deadline is not None and time.time() > deadline:
+        return NULL
+    return bulk_str(value)
+
+
+def handle_rpush(args):
+    if len(args) < 3:
+        return b"-ERR wrong number of arguments for 'rpush' command\r\n"
+
+    key = args[1]
+    elements = args[2:]
+    lists.setdefault(key, []).extend(elements)
+    return integer(len(lists[key]))
+
+
+def handle_lrange(args):
+    if len(args) != 4:
+        return b"-ERR wrong number of arguments for 'lrange' command\r\n"
+
+    key = args[1]
+    start = int(args[2])
+    end = int(args[3]) + 1
+    items = lists.get(key, [])
+    return array(items[start:end])
+
+
+HANDLERS = {
+    b"PING": handle_ping,
+    b"ECHO": handle_echo,
+    b"SET": handle_set,
+    b"GET": handle_get,
+    b"RPUSH": handle_rpush,
+    b"LRANGE": handle_lrange,
+}
+
+
 def on_client_data(conn):
     try:
         data = conn.recv(1024)
@@ -69,73 +147,14 @@ def on_client_data(conn):
             return
 
         command = args[0].upper()
-
-        if command == b"PING":
-            conn.sendall(PONG)
-        elif command == b"ECHO":
-            if len(args) != 2:
-                conn.sendall(b"-ERR wrong number of arguments for 'echo' command\r\n")
-            else:
-                msg = args[1]
-                conn.sendall(bulk_str(msg))
-        elif command == b"SET":
-            if len(args) != 3 and len(args) != 5:
-                conn.sendall(b"-ERR wrong number of arguments for 'set' command\r\n")
-            elif len(args) == 3:
-                key = args[1]
-                value = args[2]
-                deadline = None
-                notebook[key] = (value, deadline)
-                conn.sendall(OK)
-            elif len(args) == 5:
-                if args[3].upper() == b"PX":
-                    key = args[1]
-                    value = args[2]
-                    ms = int(args[4])
-                    secs = ms / 1000
-                    deadline = time.time() + secs
-                    notebook[key] = (value, deadline)
-                    conn.sendall(OK)
-                elif args[3].upper() == b"EX":
-                    key = args[1]
-                    value = args[2]
-                    deadline = time.time() + int(args[4])
-                    notebook[key] = (value, deadline)
-                    conn.sendall(OK)
-                    
-        elif command == b"GET":
-            if len(args) != 2:
-                conn.sendall(b"-ERR wrong number of arguments for 'get' command\r\n")
-            else:
-                key = args[1]
-                res = notebook.get(key)
-                if res is None:
-                    conn.sendall(NULL)
-                else:
-                    value, deadline = res
-                    if deadline is not None and time.time() > deadline:
-                        conn.sendall(NULL)
-                    else:
-                        conn.sendall(bulk_str(value))
-        elif command == b"RPUSH":
-            if len(args) < 3:
-                conn.sendall(b"-ERR wrong number of arguments for 'rpush' command\r\n")
-            else:
-                key = args[1]
-                elements = args[2:]
-                lists.setdefault(key, []).extend(elements)
-                conn.sendall(integer(len(lists[key])))
-        elif command == b"LRANGE":
-            if len(args) != 4:
-                conn.sendall(b"-ERR wrong number of arguments for 'lrange' command\r\n")
-            else:
-                key = args[1]
-                start = int(args[2])
-                end = int(args[3]) + 1
-                items = lists.get(key, [])
-                conn.sendall(array(items[start:end]))
+        handler = HANDLERS.get(command)
+        if handler is None:
+            reply = b"-ERR unknown command\r\n"
         else:
-            conn.sendall(b"-ERR unknown command\r\n")
+            reply = handler(args)
+
+        if reply is not None:
+            conn.sendall(reply)
     else:
         sel.unregister(conn)
         conn.close()
