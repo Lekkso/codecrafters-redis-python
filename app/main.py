@@ -140,6 +140,7 @@ def handle_rpush(args):
     serve_waiters(key)
     return integer(length)
 
+
 def handle_lrange(args):
     if len(args) != 4:
         return b"-ERR wrong number of arguments for 'lrange' command\r\n"
@@ -214,10 +215,10 @@ def handle_blpop(conn, args):
         element = lst.pop(0)
         return array([key, element])
 
-    waiters.setdefault(key, deadline, []).append(conn)
+    waiters.setdefault(key, []).append((conn, deadline))
     return None
 
-    
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
