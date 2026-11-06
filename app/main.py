@@ -112,6 +112,7 @@ def on_client_data(conn):
                 key = args[1]
                 element = args[2]
                 lists.setdefault(key, []).append(element)
+                conn.sendall(integer(len(lists[key])))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
     else:
