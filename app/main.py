@@ -132,6 +132,17 @@ def handle_lrange(args):
     return array(items[start:end])
 
 
+def handle_lpush(args):
+    if len(args) < 3:
+        return b"-ERR wrong number of arguments for 'lpush' command\r\n"
+
+    key = args[1]
+    elements = args[2:]
+    items = lists.setdefault(key, [])
+    for item in elements:
+        items.insert(0, item)
+    return integer(len(items))
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -139,6 +150,7 @@ HANDLERS = {
     b"GET": handle_get,
     b"RPUSH": handle_rpush,
     b"LRANGE": handle_lrange,
+    b"LPUSH": handle_lpush
 }
 
 
