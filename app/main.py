@@ -110,8 +110,8 @@ def on_client_data(conn):
                 conn.sendall(b"-ERR wrong number of arguments for 'rpush' command\r\n")
             else:
                 key = args[1]
-                element = args[2]
-                lists.setdefault(key, []).append(element)
+                element = args[2:]
+                lists.setdefault(key, []).extend(element)
                 conn.sendall(integer(len(lists[key])))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
