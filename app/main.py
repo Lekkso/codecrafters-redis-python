@@ -46,6 +46,14 @@ def integer(number):
     num = (b":" + str(number).encode() + b"\r\n")
     return num
 
+
+def array(items):
+    result = b"*" + str(len(items)).encode() + b"\r\n"
+    for item in items:
+        result += bulk_str(item)
+    return result
+
+
 def on_client_data(conn):
     try:
         data = conn.recv(1024)
@@ -71,17 +79,18 @@ def on_client_data(conn):
                 msg = args[1]
                 conn.sendall(bulk_str(msg))
         elif command == b"SET":
-            value = args[2]
             if len(args) != 3 and len(args) != 5:
                 conn.sendall(b"-ERR wrong number of arguments for 'set' command\r\n")
             elif len(args) == 3:
                 key = args[1]
+                value = args[2]
                 deadline = None
                 notebook[key] = (value, deadline)
                 conn.sendall(OK)
             elif len(args) == 5:
                 if args[3].upper() == b"PX":
                     key = args[1]
+                    value = args[2]
                     ms = int(args[4])
                     secs = ms / 1000
                     deadline = time.time() + secs
@@ -89,8 +98,10 @@ def on_client_data(conn):
                     conn.sendall(OK)
                 elif args[3].upper() == b"EX":
                     key = args[1]
+                    value = args[2]
                     deadline = time.time() + int(args[4])
                     notebook[key] = (value, deadline)
+                    conn.sendall(OK)
                     
         elif command == b"GET":
             if len(args) != 2:
@@ -98,21 +109,31 @@ def on_client_data(conn):
             else:
                 key = args[1]
                 res = notebook.get(key)
-                value, deadline = res
                 if res is None:
                     conn.sendall(NULL)
-                elif deadline is not None and time.time() > deadline:
-                    conn.sendall(NULL)
                 else:
-                    conn.sendall(bulk_str(value))
+                    value, deadline = res
+                    if deadline is not None and time.time() > deadline:
+                        conn.sendall(NULL)
+                    else:
+                        conn.sendall(bulk_str(value))
         elif command == b"RPUSH":
             if len(args) < 3:
                 conn.sendall(b"-ERR wrong number of arguments for 'rpush' command\r\n")
             else:
                 key = args[1]
-                element = args[2:]
-                lists.setdefault(key, []).extend(element)
+                elements = args[2:]
+                lists.setdefault(key, []).extend(elements)
                 conn.sendall(integer(len(lists[key])))
+        elif command == b"LRANGE":
+            if len(args) != 4:
+                conn.sendall(b"-ERR wrong number of arguments for 'lrange' command\r\n")
+            else:
+                key = args[1]
+                start = int(args[2])
+                end = int(args[3]) + 1
+                items = lists.get(key, [])
+                conn.sendall(array(items[start:end]))
         else:
             conn.sendall(b"-ERR unknown command\r\n")
     else:
