@@ -12,6 +12,7 @@ NULL = b"$-1\r\n"
 
 sel = selectors.DefaultSelector()
 notebook = {}
+lists = {}
 
 
 def parse_command(data):
@@ -27,7 +28,7 @@ def parse_command(data):
 
         args.append(data[pos:pos + length])
         pos += length + 2  
-    return args    
+    return args
 
 
 def on_new_client(server):
@@ -40,6 +41,10 @@ def bulk_str(value):
     bulk_string = (b"$" + str(len(value)).encode() + b"\r\n" + value + b"\r\n")
     return bulk_string
 
+
+def integer(number):
+    num = (b":" + str(number).encode() + b"\r\n")
+    return num
 
 def on_client_data(conn):
     try:
@@ -100,6 +105,13 @@ def on_client_data(conn):
                     conn.sendall(NULL)
                 else:
                     conn.sendall(bulk_str(value))
+        elif command == b"RPUSH":
+            if len(args) < 3:
+                conn.sendall(b"-ERR wrong number of arguments for 'rpush' command\r\n")
+            else:
+                key = args[1]
+                element = args[2]
+                lists.setdefault(key, []).append(element)
         else:
             conn.sendall(b"-ERR unknown command\r\n")
     else:
