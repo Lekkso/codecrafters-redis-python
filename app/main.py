@@ -13,6 +13,7 @@ NULL = b"$-1\r\n"
 sel = selectors.DefaultSelector()
 notebook = {}
 lists = {}
+waiters = {}
 
 
 def parse_command(data):
@@ -101,6 +102,15 @@ def handle_get(args):
     return bulk_str(value)
 
 
+def serve_waiters(key):
+    lst = lists.get(key, [])
+    queue = waiters.get(key, [])
+    while lst and queue:
+        waiter_conn = queue.pop(0)
+        element = lst.pop(0)
+        waiter_conn.sendall(array([key, element]))
+
+
 def handle_rpush(args):
     if len(args) < 3:
         return b"-ERR wrong number of arguments for 'rpush' command\r\n"
@@ -108,8 +118,9 @@ def handle_rpush(args):
     key = args[1]
     elements = args[2:]
     lists.setdefault(key, []).extend(elements)
-    return integer(len(lists[key]))
-
+    length = len(lists[key])
+    serve_waiters(key)
+    return integer(length)
 
 def handle_lrange(args):
     if len(args) != 4:
@@ -141,7 +152,9 @@ def handle_lpush(args):
     items = lists.setdefault(key, [])
     for item in elements:
         items.insert(0, item)
-    return integer(len(items))
+    length = len(items)
+    serve_waiters(key)
+    return integer(length)
 
 
 def handle_llen(args):
@@ -167,6 +180,19 @@ def handle_lpop(args):
         removed = lst[:count]
         del lst[:count]
         return array(removed)
+
+
+def handle_blpop(conn, args):
+    if len(args) != 3:
+        return b"-ERR wrong number of arguments for 'blpop' command\r\n"
+    key = args[1]
+    lst = lists.get(key, [])
+    if lst:
+        element = lst.pop(0)
+        return array([key, element])
+
+    waiters.setdefault(key, []).append(conn)
+    return None
 
     
 HANDLERS = {
@@ -197,14 +223,17 @@ def on_client_data(conn):
             return
 
         command = args[0].upper()
-        handler = HANDLERS.get(command)
-        if handler is None:
-            reply = b"-ERR unknown command\r\n"
+        if command == b"BLPOP":
+            reply = handle_blpop(conn, args)
         else:
-            try:
-                reply = handler(args)
-            except ValueError:
-                reply = b"-ERR value is not an integer or out of range\r\n"
+            handler = HANDLERS.get(command)
+            if handler is None:
+                reply = b"-ERR unknown command\r\n"
+            else:
+                try:
+                    reply = handler(args)
+                except ValueError:
+                    reply = b"-ERR value is not an integer or out of range\r\n"
 
         if reply is not None:
             conn.sendall(reply)
