@@ -219,6 +219,20 @@ def handle_blpop(conn, args):
     return None
 
 
+def handle_incr(args):
+    if len(args) != 2:
+        return b"-ERR wrong number of arguments for 'incr' command\r\n"
+    key = args[1]
+    res = notebook.get(key)
+    if res is None:
+        value, deadline = b"0", None
+    else:
+        value, deadline = res
+    new = int(value) + 1
+    notebook[key] = (str(new).encode(), deadline)
+    return integer(new)
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -228,7 +242,8 @@ HANDLERS = {
     b"LRANGE": handle_lrange,
     b"LPUSH": handle_lpush,
     b"LLEN": handle_llen,
-    b"LPOP": handle_lpop
+    b"LPOP": handle_lpop,
+    b"INCR": handle_incr
 }
 
 
