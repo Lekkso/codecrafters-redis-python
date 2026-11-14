@@ -233,6 +233,12 @@ def handle_incr(args):
     return integer(new)
 
 
+def handle_multi(args):
+    if len(args) != 1:
+        return b"-ERR wrong number of arguments for 'multi' command\r\n"
+    return OK
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -243,7 +249,8 @@ HANDLERS = {
     b"LPUSH": handle_lpush,
     b"LLEN": handle_llen,
     b"LPOP": handle_lpop,
-    b"INCR": handle_incr
+    b"INCR": handle_incr,
+    b"MULTI": handle_multi
 }
 
 
