@@ -15,6 +15,7 @@ sel = selectors.DefaultSelector()
 notebook = {}
 lists = {}
 waiters = {}
+transactions = {}
 
 
 def parse_command(data):
@@ -233,10 +234,35 @@ def handle_incr(args):
     return integer(new)
 
 
-def handle_multi(args):
+def handle_multi(conn, args):
     if len(args) != 1:
         return b"-ERR wrong number of arguments for 'multi' command\r\n"
+    transactions[conn] = []
     return OK
+
+
+def handle_exec(conn, args):
+    if len(args) != 1:
+        return b"-ERR wrong number of arguments for 'exec' command\r\n"
+    if conn not in transactions:
+        return b"-ERR EXEC without MULTI\r\n"
+    queue = transactions.pop(conn)
+    replies = []
+    for queued_args in queue:
+        command = queued_args[0].upper()
+        handler = HANDLERS.get(command)
+        if handler is None:
+            reply = b"-ERR unknown command\r\n"
+        else:
+            try:
+                reply = handler(queued_args)
+            except ValueError:
+                reply = b"-ERR value is not an integer or out of range\r\n"
+        if reply is None:
+            reply = b"-ERR syntax error\r\n"
+        replies.append(reply)
+    header = b"*" + str(len(replies)).encode() + b"\r\n"
+    return header + b"".join(replies)
 
 
 HANDLERS = {
@@ -249,8 +275,7 @@ HANDLERS = {
     b"LPUSH": handle_lpush,
     b"LLEN": handle_llen,
     b"LPOP": handle_lpop,
-    b"INCR": handle_incr,
-    b"MULTI": handle_multi
+    b"INCR": handle_incr
 }
 
 
@@ -269,7 +294,14 @@ def on_client_data(conn):
             return
 
         command = args[0].upper()
-        if command == b"BLPOP":
+        if command == b"MULTI":
+            reply = handle_multi(conn, args)
+        elif command == b"EXEC":
+            reply = handle_exec(conn, args)
+        elif conn in transactions:
+            transactions[conn].append(args)
+            reply = b"+QUEUED\r\n"
+        elif command == b"BLPOP":
             reply = handle_blpop(conn, args)
         else:
             handler = HANDLERS.get(command)
