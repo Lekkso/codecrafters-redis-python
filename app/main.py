@@ -265,6 +265,15 @@ def handle_exec(conn, args):
     return header + b"".join(replies)
 
 
+def handle_discard(conn, args):
+    if len(args) != 1:
+        return b"-ERR wrong number of arguments for 'discard' command\r\n"
+    if conn not in transactions:
+        return b"-ERR DISCARD without MULTI\r\n"
+    del transactions[conn]
+    return OK
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -298,6 +307,8 @@ def on_client_data(conn):
             reply = handle_multi(conn, args)
         elif command == b"EXEC":
             reply = handle_exec(conn, args)
+        elif command == b"DISCARD":
+            reply = handle_discard(conn, args)
         elif conn in transactions:
             transactions[conn].append(args)
             reply = b"+QUEUED\r\n"
