@@ -1,6 +1,7 @@
 import selectors
 import socket
 import time
+import traceback
 
 
 HOST = "localhost"
@@ -57,19 +58,27 @@ def array(items):
     return result
 
 
+def err(message):
+    return b"-ERR " + message.encode() + b"\r\n"
+
+
+def wrong_args(name):
+    return err(f"wrong number of arguments for '{name}' command")
+
+
 def handle_ping(args):
     return PONG
 
 
 def handle_echo(args):
     if len(args) != 2:
-        return b"-ERR wrong number of arguments for 'echo' command\r\n"
+        return wrong_args("echo")
     return bulk_str(args[1])
 
 
 def handle_set(args):
     if len(args) != 3 and len(args) != 5:
-        return b"-ERR wrong number of arguments for 'set' command\r\n"
+        return wrong_args("set")
 
     key = args[1]
     value = args[2]
@@ -84,7 +93,7 @@ def handle_set(args):
     elif option == b"EX":
         deadline = time.time() + int(args[4])
     else:
-        return None
+        return err("syntax error")
 
     notebook[key] = (value, deadline)
     return OK
@@ -92,7 +101,7 @@ def handle_set(args):
 
 def handle_get(args):
     if len(args) != 2:
-        return b"-ERR wrong number of arguments for 'get' command\r\n"
+        return wrong_args("get")
 
     res = notebook.get(args[1])
     if res is None:
@@ -100,6 +109,7 @@ def handle_get(args):
 
     value, deadline = res
     if deadline is not None and time.time() > deadline:
+        del notebook[args[1]]
         return NULL
     return bulk_str(value)
 
@@ -132,7 +142,7 @@ def expire_waiters():
 
 def handle_rpush(args):
     if len(args) < 3:
-        return b"-ERR wrong number of arguments for 'rpush' command\r\n"
+        return wrong_args("rpush")
 
     key = args[1]
     elements = args[2:]
@@ -144,7 +154,7 @@ def handle_rpush(args):
 
 def handle_lrange(args):
     if len(args) != 4:
-        return b"-ERR wrong number of arguments for 'lrange' command\r\n"
+        return wrong_args("lrange")
 
     key = args[1]
     items = lists.get(key, [])
@@ -165,7 +175,7 @@ def handle_lrange(args):
 
 def handle_lpush(args):
     if len(args) < 3:
-        return b"-ERR wrong number of arguments for 'lpush' command\r\n"
+        return wrong_args("lpush")
 
     key = args[1]
     elements = args[2:]
@@ -179,7 +189,7 @@ def handle_lpush(args):
 
 def handle_llen(args):
     if len(args) != 2:
-        return b"-ERR wrong number of arguments for 'llen' command\r\n"
+        return wrong_args("llen")
 
     lst = lists.get(args[1], [])
     return integer(len(lst))
@@ -187,7 +197,7 @@ def handle_llen(args):
 
 def handle_lpop(args):
     if len(args) not in (2, 3):
-        return b"-ERR wrong number of arguments for 'lpop' command\r\n"
+        return wrong_args("lpop")
 
     lst = lists.get(args[1], [])
     if len(args) == 2:
@@ -204,7 +214,7 @@ def handle_lpop(args):
 
 def handle_blpop(conn, args):
     if len(args) != 3:
-        return b"-ERR wrong number of arguments for 'blpop' command\r\n"
+        return wrong_args("blpop")
     timeout = float(args[2])
     if timeout == 0:
         deadline = None
@@ -222,13 +232,15 @@ def handle_blpop(conn, args):
 
 def handle_incr(args):
     if len(args) != 2:
-        return b"-ERR wrong number of arguments for 'incr' command\r\n"
+        return wrong_args("incr")
     key = args[1]
     res = notebook.get(key)
     if res is None:
         value, deadline = b"0", None
     else:
         value, deadline = res
+        if deadline is not None and time.time() > deadline:
+            value, deadline = b"0", None
     new = int(value) + 1
     notebook[key] = (str(new).encode(), deadline)
     return integer(new)
@@ -236,30 +248,22 @@ def handle_incr(args):
 
 def handle_multi(conn, args):
     if len(args) != 1:
-        return b"-ERR wrong number of arguments for 'multi' command\r\n"
+        return wrong_args("multi")
     transactions[conn] = []
     return OK
 
 
 def handle_exec(conn, args):
     if len(args) != 1:
-        return b"-ERR wrong number of arguments for 'exec' command\r\n"
+        return wrong_args("exec")
     if conn not in transactions:
-        return b"-ERR EXEC without MULTI\r\n"
+        return err("EXEC without MULTI")
     queue = transactions.pop(conn)
     replies = []
     for queued_args in queue:
-        command = queued_args[0].upper()
-        handler = HANDLERS.get(command)
-        if handler is None:
-            reply = b"-ERR unknown command\r\n"
-        else:
-            try:
-                reply = handler(queued_args)
-            except ValueError:
-                reply = b"-ERR value is not an integer or out of range\r\n"
+        reply = execute(conn, queued_args)
         if reply is None:
-            reply = b"-ERR syntax error\r\n"
+            reply = err("syntax error")
         replies.append(reply)
     header = b"*" + str(len(replies)).encode() + b"\r\n"
     return header + b"".join(replies)
@@ -267,16 +271,16 @@ def handle_exec(conn, args):
 
 def handle_discard(conn, args):
     if len(args) != 1:
-        return b"-ERR wrong number of arguments for 'discard' command\r\n"
+        return wrong_args("discard")
     if conn not in transactions:
-        return b"-ERR DISCARD without MULTI\r\n"
+        return err("DISCARD without MULTI")
     del transactions[conn]
     return OK
 
 
 def handle_watch(args):
-    if len(args) != 2:
-        return b"-ERR wrong number of arguments for 'watch' command\r\n"
+    if len(args) < 2:
+        return wrong_args("watch")
     return OK
 
 
@@ -291,8 +295,29 @@ HANDLERS = {
     b"LLEN": handle_llen,
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
-    b"WATCH": handle_watch
+    b"WATCH": handle_watch,
 }
+
+
+def execute(conn, args):
+    command = args[0].upper()
+    try:
+        if command == b"BLPOP":
+            return handle_blpop(conn, args)
+        handler = HANDLERS.get(command)
+        if handler is None:
+            return err("unknown command")
+        return handler(args)
+    except ValueError:
+        return err("value is not an integer or out of range")
+
+
+def drop_client(conn):
+    transactions.pop(conn, None)
+    for key in list(waiters):
+        waiters[key] = [(c, d) for c, d in waiters[key] if c is not conn]
+    sel.unregister(conn)
+    conn.close()
 
 
 def on_client_data(conn):
@@ -300,42 +325,33 @@ def on_client_data(conn):
         data = conn.recv(1024)
     except ConnectionResetError:
         data = b""
-    if data:
-        try:
-            args = parse_command(data)
-        except ValueError:
-            conn.sendall(b"-ERR protocol error\r\n")
-            return
-        if not args:
-            return
+    if not data:
+        drop_client(conn)
+        return
 
-        command = args[0].upper()
-        if command == b"MULTI":
-            reply = handle_multi(conn, args)
-        elif command == b"EXEC":
-            reply = handle_exec(conn, args)
-        elif command == b"DISCARD":
-            reply = handle_discard(conn, args)
-        elif conn in transactions:
-            transactions[conn].append(args)
-            reply = b"+QUEUED\r\n"
-        elif command == b"BLPOP":
-            reply = handle_blpop(conn, args)
-        else:
-            handler = HANDLERS.get(command)
-            if handler is None:
-                reply = b"-ERR unknown command\r\n"
-            else:
-                try:
-                    reply = handler(args)
-                except ValueError:
-                    reply = b"-ERR value is not an integer or out of range\r\n"
+    try:
+        args = parse_command(data)
+    except ValueError:
+        conn.sendall(err("protocol error"))
+        return
+    if not args:
+        return
 
-        if reply is not None:
-            conn.sendall(reply)
+    command = args[0].upper()
+    if command == b"MULTI":
+        reply = handle_multi(conn, args)
+    elif command == b"EXEC":
+        reply = handle_exec(conn, args)
+    elif command == b"DISCARD":
+        reply = handle_discard(conn, args)
+    elif conn in transactions:
+        transactions[conn].append(args)
+        reply = b"+QUEUED\r\n"
     else:
-        sel.unregister(conn)
-        conn.close()
+        reply = execute(conn, args)
+
+    if reply is not None:
+        conn.sendall(reply)
 
 
 def main():
@@ -345,8 +361,14 @@ def main():
     while True:
         for key, _ in sel.select(timeout=next_timeout()):
             callback = key.data
-            callback(key.fileobj)
-        expire_waiters()
+            try:
+                callback(key.fileobj)
+            except Exception:
+                traceback.print_exc()
+        try:
+            expire_waiters()
+        except Exception:
+            traceback.print_exc()
 
 
 if __name__ == "__main__":
