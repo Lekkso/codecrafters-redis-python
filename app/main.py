@@ -17,6 +17,7 @@ notebook = {}
 lists = {}
 waiters = {}
 transactions = {}
+watched = {}
 
 
 def parse_command(data):
@@ -278,9 +279,12 @@ def handle_discard(conn, args):
     return OK
 
 
-def handle_watch(args):
+def handle_watch(conn, args):
     if len(args) < 2:
         return wrong_args("watch")
+    if conn in transactions:
+        return err("WATCH inside MULTI is not allowed")
+    watched.setdefault(conn, set()).update(args[1:])
     return OK
 
 
@@ -295,7 +299,6 @@ HANDLERS = {
     b"LLEN": handle_llen,
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
-    b"WATCH": handle_watch,
 }
 
 
@@ -314,6 +317,7 @@ def execute(conn, args):
 
 def drop_client(conn):
     transactions.pop(conn, None)
+    watched.pop(conn, None)
     for key in list(waiters):
         waiters[key] = [(c, d) for c, d in waiters[key] if c is not conn]
     sel.unregister(conn)
@@ -344,6 +348,8 @@ def on_client_data(conn):
         reply = handle_exec(conn, args)
     elif command == b"DISCARD":
         reply = handle_discard(conn, args)
+    elif command == b"WATCH":
+        reply = handle_watch(conn, args)
     elif conn in transactions:
         transactions[conn].append(args)
         reply = b"+QUEUED\r\n"
