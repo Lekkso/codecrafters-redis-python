@@ -310,6 +310,13 @@ def handle_watch(conn, args):
     return OK
 
 
+def handle_unwatch(conn, args):
+    if len(args) != 1:
+        return wrong_args("unwatch")
+    watched.pop(conn, None)
+    return OK
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -372,6 +379,8 @@ def on_client_data(conn):
         reply = handle_discard(conn, args)
     elif command == b"WATCH":
         reply = handle_watch(conn, args)
+    elif command == b"UNWATCH":
+        reply = handle_unwatch(conn, args)
     elif conn in transactions:
         transactions[conn].append(args)
         reply = b"+QUEUED\r\n"
