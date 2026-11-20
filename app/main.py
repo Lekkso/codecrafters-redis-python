@@ -18,6 +18,7 @@ lists = {}
 waiters = {}
 transactions = {}
 watched = {}
+versions = {}
 
 
 def parse_command(data):
@@ -66,6 +67,9 @@ def err(message):
 def wrong_args(name):
     return err(f"wrong number of arguments for '{name}' command")
 
+def touch(key):
+    versions[key] = versions.get(key, 0) + 1
+
 
 def handle_ping(args):
     return PONG
@@ -86,6 +90,7 @@ def handle_set(args):
 
     if len(args) == 3:
         notebook[key] = (value, None)
+        touch(key)
         return OK
 
     option = args[3].upper()
@@ -97,6 +102,7 @@ def handle_set(args):
         return err("syntax error")
 
     notebook[key] = (value, deadline)
+    touch(key)
     return OK
 
 
@@ -121,6 +127,7 @@ def serve_waiters(key):
     while lst and queue:
         waiter_conn, _ = queue.pop(0)
         element = lst.pop(0)
+        touch(key)
         waiter_conn.sendall(array([key, element]))
 
 
@@ -148,6 +155,7 @@ def handle_rpush(args):
     key = args[1]
     elements = args[2:]
     lists.setdefault(key, []).extend(elements)
+    touch(key)
     length = len(lists[key])
     serve_waiters(key)
     return integer(length)
@@ -183,6 +191,7 @@ def handle_lpush(args):
     items = lists.setdefault(key, [])
     for item in elements:
         items.insert(0, item)
+    touch(key)
     length = len(items)
     serve_waiters(key)
     return integer(length)
@@ -200,16 +209,20 @@ def handle_lpop(args):
     if len(args) not in (2, 3):
         return wrong_args("lpop")
 
-    lst = lists.get(args[1], [])
+    key = args[1]
+    lst = lists.get(key, [])
     if len(args) == 2:
         if not lst:
             return NULL
         first = lst.pop(0)
+        touch(key)
         return bulk_str(first)
     if len(args) == 3:
         count = int(args[2])
         removed = lst[:count]
         del lst[:count]
+        if removed:
+            touch(key)
         return array(removed)
 
 
@@ -225,6 +238,7 @@ def handle_blpop(conn, args):
     lst = lists.get(key, [])
     if lst:
         element = lst.pop(0)
+        touch(key)
         return array([key, element])
 
     waiters.setdefault(key, []).append((conn, deadline))
@@ -244,6 +258,7 @@ def handle_incr(args):
             value, deadline = b"0", None
     new = int(value) + 1
     notebook[key] = (str(new).encode(), deadline)
+    touch(key)
     return integer(new)
 
 
@@ -260,6 +275,10 @@ def handle_exec(conn, args):
     if conn not in transactions:
         return err("EXEC without MULTI")
     queue = transactions.pop(conn)
+    snapshot = watched.pop(conn, {})
+    for key, version in snapshot.items():
+        if versions.get(key, 0) != version:
+            return NULL_ARRAY
     replies = []
     for queued_args in queue:
         reply = execute(conn, queued_args)
@@ -276,6 +295,7 @@ def handle_discard(conn, args):
     if conn not in transactions:
         return err("DISCARD without MULTI")
     del transactions[conn]
+    watched.pop(conn, None)
     return OK
 
 
@@ -284,7 +304,9 @@ def handle_watch(conn, args):
         return wrong_args("watch")
     if conn in transactions:
         return err("WATCH inside MULTI is not allowed")
-    watched.setdefault(conn, set()).update(args[1:])
+    snapshot = watched.setdefault(conn, {})
+    for key in args[1:]:
+        snapshot.setdefault(key, versions.get(key, 0))
     return OK
 
 
