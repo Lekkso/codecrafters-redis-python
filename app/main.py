@@ -425,6 +425,8 @@ def connect_to_master(master_address, replica_port):
     master_conn.recv(1024)
     master_conn.sendall(array([b"REPLCONF", b"capa", b"psync2"]))
     master_conn.recv(1024)
+    master_conn.sendall(array([b"PSYNC", b"?", b"-1"]))
+    master_conn.recv(1024)
     return master_conn
 
 
