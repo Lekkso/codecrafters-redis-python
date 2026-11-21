@@ -416,10 +416,15 @@ def parse_options():
     return parser.parse_args()
 
 
-def connect_to_master(master_address):
+def connect_to_master(master_address, replica_port):
     master_host, master_port = master_address.split()
     master_conn = socket.create_connection((master_host, int(master_port)))
     master_conn.sendall(array([b"PING"]))
+    master_conn.recv(1024)
+    master_conn.sendall(array([b"REPLCONF", b"listening-port", str(replica_port).encode()]))
+    master_conn.recv(1024)
+    master_conn.sendall(array([b"REPLCONF", b"capa", b"psync2"]))
+    master_conn.recv(1024)
     return master_conn
 
 
@@ -431,7 +436,7 @@ def main():
     server = socket.create_server((HOST, options.port))
     master_conn = None
     if options.replicaof is not None:
-        master_conn = connect_to_master(options.replicaof)
+        master_conn = connect_to_master(options.replicaof, options.port)
     sel.register(server, selectors.EVENT_READ, on_new_client)
     while True:
         for key, _ in sel.select(timeout=next_timeout()):
