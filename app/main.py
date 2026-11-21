@@ -28,6 +28,8 @@ watched = {}
 versions = {}
 buffers = {}
 replicas = []
+replica_acks = {}
+wait_requests = []
 
 
 role = "master"
@@ -174,9 +176,19 @@ def serve_waiters(key):
 
 def next_timeout():
     deadlines = [d for queue in waiters.values() for _, d in queue if d is not None]
+    deadlines += [r[2] for r in wait_requests if r[2] is not None]
     if not deadlines:
         return None
     return max(0, min(deadlines) - time.time())
+
+
+def expire_waits():
+    now = time.time()
+    for request in wait_requests[:]:
+        client, needed, deadline, target = request
+        if deadline is not None and now > deadline:
+            wait_requests.remove(request)
+            client.sendall(integer(count_acked(target)))
 
 
 def expire_waiters():
@@ -370,7 +382,9 @@ def handle_info(args):
 
 
 def handle_replconf(conn, args):
-    if len(args) > 1 and args[1].upper() == b"ACK":
+    if len(args) > 2 and args[1].upper() == b"ACK":
+        replica_acks[conn] = int(args[2])
+        check_waits()
         return None
     return OK
 
@@ -382,13 +396,48 @@ def handle_psync(conn, args):
     rdb = b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB
     conn.sendall(header + rdb)
     replicas.append(conn)
+    replica_acks[conn] = 0
     return None
 
 
-def handle_wait(args):
+def count_acked(target):
+    return sum(1 for r in replicas if replica_acks.get(r, 0) >= target)
+
+
+def check_waits():
+    for request in wait_requests[:]:
+        client, needed, deadline, target = request
+        count = count_acked(target)
+        if count >= needed:
+            wait_requests.remove(request)
+            client.sendall(integer(count))
+
+
+def handle_wait(conn, args):
+    global master_repl_offset
     if len(args) != 3:
         return wrong_args("wait")
-    return integer(len(replicas))
+    needed = int(args[1])
+    timeout_ms = int(args[2])
+
+    if master_repl_offset == 0:
+        return integer(len(replicas))
+
+    target = master_repl_offset
+    if count_acked(target) >= needed:
+        return integer(count_acked(target))
+
+    getack = array([b"REPLCONF", b"GETACK", b"*"])
+    for replica in replicas[:]:
+        try:
+            replica.sendall(getack)
+        except OSError:
+            replicas.remove(replica)
+    master_repl_offset += len(getack)
+
+    deadline = None if timeout_ms == 0 else time.time() + timeout_ms / 1000
+    wait_requests.append((conn, needed, deadline, target))
+    return None
 
 
 HANDLERS = {
@@ -403,7 +452,6 @@ HANDLERS = {
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
     b"INFO": handle_info,
-    b"WAIT": handle_wait,
 }
 
 
@@ -444,6 +492,8 @@ def dispatch(conn, args):
         return handle_replconf(conn, args)
     if command == b"PSYNC":
         return handle_psync(conn, args)
+    if command == b"WAIT":
+        return handle_wait(conn, args)
     if conn in transactions:
         transactions[conn].append(args)
         return b"+QUEUED\r\n"
@@ -488,6 +538,8 @@ def drop_client(conn):
     transactions.pop(conn, None)
     watched.pop(conn, None)
     buffers.pop(conn, None)
+    replica_acks.pop(conn, None)
+    wait_requests[:] = [r for r in wait_requests if r[0] is not conn]
     if conn in replicas:
         replicas.remove(conn)
     for key in list(waiters):
@@ -587,6 +639,10 @@ def main():
                 traceback.print_exc()
         try:
             expire_waiters()
+        except Exception:
+            traceback.print_exc()
+        try:
+            expire_waits()
         except Exception:
             traceback.print_exc()
 
