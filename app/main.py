@@ -2,10 +2,11 @@ import selectors
 import socket
 import time
 import traceback
+import argparse
 
 
 HOST = "localhost"
-PORT = 6379
+DEFAULT_PORT = 6379
 PONG = b"+PONG\r\n"
 OK = b"+OK\r\n"
 NULL = b"$-1\r\n"
@@ -391,9 +392,15 @@ def on_client_data(conn):
         conn.sendall(reply)
 
 
+def parse_options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    return parser.parse_args()
+
+
 def main():
-    server = socket.create_server((HOST, PORT))
-    server.setblocking(False)
+    options = parse_options()
+    server = socket.create_server((HOST, options.port))
     sel.register(server, selectors.EVENT_READ, on_new_client)
     while True:
         for key, _ in sel.select(timeout=next_timeout()):
