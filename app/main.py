@@ -81,6 +81,10 @@ def handle_ping(args):
     return PONG
 
 
+def handle_replconf(args):
+    return OK
+
+
 def handle_echo(args):
     if len(args) != 2:
         return wrong_args("echo")
@@ -346,6 +350,7 @@ HANDLERS = {
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
     b"INFO": handle_info,
+    b"replconf": handle_replconf,
 }
 
 
