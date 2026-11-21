@@ -385,6 +385,12 @@ def handle_psync(conn, args):
     return None
 
 
+def handle_wait(args):
+    if len(args) != 3:
+        return wrong_args("wait")
+    integer(len(replicas))
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -397,6 +403,7 @@ HANDLERS = {
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
     b"INFO": handle_info,
+    b"WAIT": handle_wait,
 }
 
 
