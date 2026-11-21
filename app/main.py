@@ -318,6 +318,12 @@ def handle_unwatch(conn, args):
     return OK
 
 
+def handle_info(args):
+    if len(args) > 2:
+        return wrong_args("info")
+    return bulk_str(b"role:master")
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -329,6 +335,7 @@ HANDLERS = {
     b"LLEN": handle_llen,
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
+    b"INFO": handle_info,
 }
 
 
