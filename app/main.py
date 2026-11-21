@@ -388,7 +388,7 @@ def handle_psync(conn, args):
 def handle_wait(args):
     if len(args) != 3:
         return wrong_args("wait")
-    integer(len(replicas))
+    return integer(len(replicas))
 
 
 HANDLERS = {
