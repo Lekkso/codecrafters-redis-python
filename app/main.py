@@ -20,6 +20,7 @@ waiters = {}
 transactions = {}
 watched = {}
 versions = {}
+role = "master"
 
 
 def parse_command(data):
@@ -321,7 +322,7 @@ def handle_unwatch(conn, args):
 def handle_info(args):
     if len(args) > 2:
         return wrong_args("info")
-    return bulk_str(b"role:master")
+    return bulk_str(f"role:{role}".encode())
 
 
 HANDLERS = {
@@ -402,11 +403,15 @@ def on_client_data(conn):
 def parse_options():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--replicaof", type=str, default=None)
     return parser.parse_args()
 
 
 def main():
+    global role
     options = parse_options()
+    if options.replicaof is not None:
+        role = "slave"
     server = socket.create_server((HOST, options.port))
     sel.register(server, selectors.EVENT_READ, on_new_client)
     while True:
