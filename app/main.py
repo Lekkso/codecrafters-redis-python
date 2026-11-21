@@ -1,8 +1,8 @@
+import argparse
 import selectors
 import socket
 import time
 import traceback
-import argparse
 
 
 HOST = "localhost"
@@ -11,6 +11,12 @@ PONG = b"+PONG\r\n"
 OK = b"+OK\r\n"
 NULL = b"$-1\r\n"
 NULL_ARRAY = b"*-1\r\n"
+EMPTY_RDB = bytes.fromhex(
+    "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473"
+    "c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d626173"
+    "65c000fff06e3bfec0ff5aa2"
+)
+WRITE_COMMANDS = {b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP"}
 
 
 sel = selectors.DefaultSelector()
@@ -20,27 +26,44 @@ waiters = {}
 transactions = {}
 watched = {}
 versions = {}
+buffers = {}
+replicas = []
 
 
 role = "master"
 master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 master_repl_offset = 0
+replica_offset = 0
 
 
 def parse_command(data):
-    pos = data.find(b"\r\n")
-    count = int(data[1:pos])
-    pos += 2
+    if not data:
+        return None
+    if data[0:1] != b"*":
+        raise ValueError("protocol error")
+    end = data.find(b"\r\n")
+    if end == -1:
+        return None
+    count = int(data[1:end])
+    pos = end + 2
 
     args = []
     for _ in range(count):
+        if pos >= len(data):
+            return None
+        if data[pos:pos + 1] != b"$":
+            raise ValueError("protocol error")
         end = data.find(b"\r\n", pos)
+        if end == -1:
+            return None
         length = int(data[pos + 1:end])
         pos = end + 2
+        if len(data) < pos + length + 2:
+            return None
 
         args.append(data[pos:pos + length])
         pos += length + 2
-    return args
+    return args, pos
 
 
 def on_new_client(server):
@@ -73,16 +96,24 @@ def err(message):
 def wrong_args(name):
     return err(f"wrong number of arguments for '{name}' command")
 
+
 def touch(key):
     versions[key] = versions.get(key, 0) + 1
 
 
+def propagate(args):
+    global master_repl_offset
+    data = array(args)
+    master_repl_offset += len(data)
+    for replica in replicas[:]:
+        try:
+            replica.sendall(data)
+        except OSError:
+            replicas.remove(replica)
+
+
 def handle_ping(args):
     return PONG
-
-
-def handle_replconf(args):
-    return OK
 
 
 def handle_echo(args):
@@ -338,6 +369,22 @@ def handle_info(args):
     return bulk_str(info.encode())
 
 
+def handle_replconf(conn, args):
+    if len(args) > 1 and args[1].upper() == b"ACK":
+        return None
+    return OK
+
+
+def handle_psync(conn, args):
+    if len(args) != 3:
+        return wrong_args("psync")
+    header = f"+FULLRESYNC {master_replid} {master_repl_offset}\r\n".encode()
+    rdb = b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB
+    conn.sendall(header + rdb)
+    replicas.append(conn)
+    return None
+
+
 HANDLERS = {
     b"PING": handle_ping,
     b"ECHO": handle_echo,
@@ -350,7 +397,6 @@ HANDLERS = {
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
     b"INFO": handle_info,
-    b"REPLCONF": handle_replconf,
 }
 
 
@@ -362,56 +408,109 @@ def execute(conn, args):
         handler = HANDLERS.get(command)
         if handler is None:
             return err("unknown command")
-        return handler(args)
+        reply = handler(args)
     except ValueError:
         return err("value is not an integer or out of range")
+    if (
+        command in WRITE_COMMANDS
+        and role == "master"
+        and reply is not None
+        and not reply.startswith(b"-")
+    ):
+        propagate(args)
+    return reply
+
+
+def dispatch(conn, args):
+    command = args[0].upper()
+    if command == b"MULTI":
+        return handle_multi(conn, args)
+    if command == b"EXEC":
+        return handle_exec(conn, args)
+    if command == b"DISCARD":
+        return handle_discard(conn, args)
+    if command == b"WATCH":
+        return handle_watch(conn, args)
+    if command == b"UNWATCH":
+        return handle_unwatch(conn, args)
+    if command == b"REPLCONF":
+        return handle_replconf(conn, args)
+    if command == b"PSYNC":
+        return handle_psync(conn, args)
+    if conn in transactions:
+        transactions[conn].append(args)
+        return b"+QUEUED\r\n"
+    return execute(conn, args)
+
+
+def run_master_command(conn, args):
+    command = args[0].upper()
+    if command == b"REPLCONF" and len(args) > 1 and args[1].upper() == b"GETACK":
+        conn.sendall(array([b"REPLCONF", b"ACK", str(replica_offset).encode()]))
+        return
+    execute(conn, args)
+
+
+def process_buffer(conn, from_master=False):
+    global replica_offset
+    while True:
+        buf = buffers.get(conn, b"")
+        try:
+            parsed = parse_command(buf)
+        except ValueError:
+            buffers[conn] = b""
+            if not from_master:
+                conn.sendall(err("protocol error"))
+            return
+        if parsed is None:
+            return
+        args, used = parsed
+        buffers[conn] = buf[used:]
+        if args:
+            if from_master:
+                run_master_command(conn, args)
+            else:
+                reply = dispatch(conn, args)
+                if reply is not None:
+                    conn.sendall(reply)
+        if from_master:
+            replica_offset += used
 
 
 def drop_client(conn):
     transactions.pop(conn, None)
     watched.pop(conn, None)
+    buffers.pop(conn, None)
+    if conn in replicas:
+        replicas.remove(conn)
     for key in list(waiters):
         waiters[key] = [(c, d) for c, d in waiters[key] if c is not conn]
     sel.unregister(conn)
     conn.close()
 
 
-def on_client_data(conn):
+def read_data(conn):
     try:
-        data = conn.recv(1024)
+        data = conn.recv(4096)
     except ConnectionResetError:
         data = b""
+    except BlockingIOError:
+        return None
     if not data:
         drop_client(conn)
-        return
+        return None
+    buffers[conn] = buffers.get(conn, b"") + data
+    return data
 
-    try:
-        args = parse_command(data)
-    except ValueError:
-        conn.sendall(err("protocol error"))
-        return
-    if not args:
-        return
 
-    command = args[0].upper()
-    if command == b"MULTI":
-        reply = handle_multi(conn, args)
-    elif command == b"EXEC":
-        reply = handle_exec(conn, args)
-    elif command == b"DISCARD":
-        reply = handle_discard(conn, args)
-    elif command == b"WATCH":
-        reply = handle_watch(conn, args)
-    elif command == b"UNWATCH":
-        reply = handle_unwatch(conn, args)
-    elif conn in transactions:
-        transactions[conn].append(args)
-        reply = b"+QUEUED\r\n"
-    else:
-        reply = execute(conn, args)
+def on_client_data(conn):
+    if read_data(conn) is not None:
+        process_buffer(conn)
 
-    if reply is not None:
-        conn.sendall(reply)
+
+def on_master_data(conn):
+    if read_data(conn) is not None:
+        process_buffer(conn, from_master=True)
 
 
 def parse_options():
@@ -421,18 +520,42 @@ def parse_options():
     return parser.parse_args()
 
 
+def recv_until(sock, buf, marker):
+    while marker not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("master closed the connection")
+        buf += chunk
+    line, _, rest = buf.partition(marker)
+    return line, rest
+
+
+def recv_exact(sock, buf, size):
+    while len(buf) < size:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("master closed the connection")
+        buf += chunk
+    return buf[:size], buf[size:]
+
+
 def connect_to_master(master_address, replica_port):
     master_host, master_port = master_address.split()
-    master_conn = socket.create_connection((master_host, int(master_port)))
-    master_conn.sendall(array([b"PING"]))
-    master_conn.recv(1024)
-    master_conn.sendall(array([b"REPLCONF", b"listening-port", str(replica_port).encode()]))
-    master_conn.recv(1024)
-    master_conn.sendall(array([b"REPLCONF", b"capa", b"psync2"]))
-    master_conn.recv(1024)
-    master_conn.sendall(array([b"PSYNC", b"?", b"-1"]))
-    master_conn.recv(1024)
-    return master_conn
+    sock = socket.create_connection((master_host, int(master_port)))
+    buf = b""
+    handshake = [
+        [b"PING"],
+        [b"REPLCONF", b"listening-port", str(replica_port).encode()],
+        [b"REPLCONF", b"capa", b"psync2"],
+        [b"PSYNC", b"?", b"-1"],
+    ]
+    for command in handshake:
+        sock.sendall(array(command))
+        _, buf = recv_until(sock, buf, b"\r\n")
+    header, buf = recv_until(sock, buf, b"\r\n")
+    _, buf = recv_exact(sock, buf, int(header[1:]))
+    sock.setblocking(False)
+    return sock, buf
 
 
 def main():
@@ -441,10 +564,13 @@ def main():
     if options.replicaof is not None:
         role = "slave"
     server = socket.create_server((HOST, options.port))
-    master_conn = None
-    if options.replicaof is not None:
-        master_conn = connect_to_master(options.replicaof, options.port)
+    server.setblocking(False)
     sel.register(server, selectors.EVENT_READ, on_new_client)
+    if options.replicaof is not None:
+        master_conn, leftover = connect_to_master(options.replicaof, options.port)
+        buffers[master_conn] = leftover
+        sel.register(master_conn, selectors.EVENT_READ, on_master_data)
+        process_buffer(master_conn, from_master=True)
     while True:
         for key, _ in sel.select(timeout=next_timeout()):
             callback = key.data
