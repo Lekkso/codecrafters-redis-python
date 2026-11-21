@@ -350,7 +350,7 @@ HANDLERS = {
     b"LPOP": handle_lpop,
     b"INCR": handle_incr,
     b"INFO": handle_info,
-    b"replconf": handle_replconf,
+    b"REPLCONF": handle_replconf,
 }
 
 
