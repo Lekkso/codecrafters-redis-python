@@ -416,12 +416,22 @@ def parse_options():
     return parser.parse_args()
 
 
+def connect_to_master(master_address):
+    master_host, master_port = master_address.split()
+    master_conn = socket.create_connection((master_host, int(master_port)))
+    master_conn.sendall(array([b"PING"]))
+    return master_conn
+
+
 def main():
     global role
     options = parse_options()
     if options.replicaof is not None:
         role = "slave"
     server = socket.create_server((HOST, options.port))
+    master_conn = None
+    if options.replicaof is not None:
+        master_conn = connect_to_master(options.replicaof)
     sel.register(server, selectors.EVENT_READ, on_new_client)
     while True:
         for key, _ in sel.select(timeout=next_timeout()):
