@@ -20,7 +20,11 @@ waiters = {}
 transactions = {}
 watched = {}
 versions = {}
+
+
 role = "master"
+master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+master_repl_offset = 0
 
 
 def parse_command(data):
@@ -322,7 +326,12 @@ def handle_unwatch(conn, args):
 def handle_info(args):
     if len(args) > 2:
         return wrong_args("info")
-    return bulk_str(f"role:{role}".encode())
+    info = (
+        f"role:{role}\r\n"
+        f"master_replid:{master_replid}\r\n"
+        f"master_repl_offset:{master_repl_offset}"
+    )
+    return bulk_str(info.encode())
 
 
 HANDLERS = {
