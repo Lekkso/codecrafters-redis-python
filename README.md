@@ -98,7 +98,7 @@ CodeCrafters extensions, in the order the challenge lists them:
 - [x] Lists
 - [x] Transactions (`INCR`, `MULTI`, `EXEC`, `DISCARD`)
 - [x] Optimistic locking (`WATCH`, `UNWATCH`)
-- [ ] Replication (in progress)
+- [x] Replication
 - [ ] RDB persistence
 - [ ] AOF persistence
 - [ ] Pub/Sub
